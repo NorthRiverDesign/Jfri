@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<AssemblyName>jfri</AssemblyName>
+		<RootNamespace>Jfri.Cli</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Jfri.Core\Jfri.Core.csproj" />
+	</ItemGroup>
+</Project>

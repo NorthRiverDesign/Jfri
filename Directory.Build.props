@@ -1,0 +1,15 @@
+<Project>
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<LangVersion>latest</LangVersion>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<NoWarn>$(NoWarn);CS1591</NoWarn>
+		<Authors>Jfri contributors</Authors>
+		<Product>Jfri</Product>
+		<Description>Just F*ing Run It: point it at a repository, get a production-grade deployment.</Description>
+		<RepositoryType>git</RepositoryType>
+		<InvariantGlobalization>true</InvariantGlobalization>
+	</PropertyGroup>
+</Project>

@@ -1,0 +1,47 @@
+@page
+@model IndexModel
+@{
+	ViewData["Title"] = "Apps";
+}
+<section class="card hero">
+	<h1>Deploy a repository</h1>
+	<p class="muted">Paste a repository URL. Jfri works out the stack, database, storage and background jobs, then shows what it will run and what it costs at each provider.</p>
+	<form method="post" asp-page-handler="Connect" class="connect">
+		<label>Repository URL <input name="RepoUrl" value="@Model.RepoUrl" placeholder="https://github.com/you/your-app" required inputmode="url" autocomplete="off" /></label>
+		<details>
+			<summary>Branch or private repository</summary>
+			<label>Branch <input name="Branch" value="@Model.Branch" placeholder="default branch" autocomplete="off" /></label>
+			<label>Access token <small>(read-only; stored encrypted)</small> <input name="Token" type="password" autocomplete="off" /></label>
+		</details>
+		@if (Model.Error is not null)
+		{
+			<p class="error">@Model.Error</p>
+		}
+		<button type="submit" class="primary">Analyze</button>
+	</form>
+</section>
+
+@if (Model.Apps.Count > 0)
+{
+	<section>
+		<h2>Your apps</h2>
+		<ul class="list">
+			@foreach (var item in Model.Apps)
+			{
+				<li>
+					<a href="/apps/@item.App.Id" class="row">
+						<span>
+							<strong>@item.App.Name</strong>
+							<small class="muted">@item.Summary</small>
+						</span>
+						<span class="badge @item.Status">@item.Status</span>
+					</a>
+					@if (item.App.LiveUrl is not null)
+					{
+						<a class="live" href="@item.App.LiveUrl" rel="noopener noreferrer" target="_blank">@item.App.LiveUrl</a>
+					}
+				</li>
+			}
+		</ul>
+	</section>
+}

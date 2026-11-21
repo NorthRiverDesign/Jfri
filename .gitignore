@@ -1,0 +1,26 @@
+# Build output
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.idea/
+.vscode/
+TestResults/
+*.trx
+coverage*/
+
+# Jfri runtime data (database, key ring, clones). Defaults to ~/.local/share/jfri,
+# but keep a local ./data out of git if someone points JFRI_DATA_DIR at it.
+/data/
+*.db
+*.db-shm
+*.db-wal
+/keys/
+/workspaces/
+/setup-token
+
+
+# Generated output from `jfri plan --out`
+/jfri-out/

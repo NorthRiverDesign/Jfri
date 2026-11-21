@@ -1,0 +1,26 @@
+@page "/deployments/{id:int}"
+@model Jfri.Web.Pages.Deployments.DetailsModel
+@{
+	ViewData["Title"] = $"Deployment #{Model.Deployment.Id}";
+}
+<header class="page-head">
+	<div>
+		<h1>Deployment #@Model.Deployment.Id</h1>
+		<p class="muted small"><a href="/apps/@Model.App.Id">@Model.App.Name</a> · @Model.Deployment.Trigger · @Model.Deployment.CreatedAt.ToString("u")</p>
+	</div>
+	<span id="status" class="badge @Model.Deployment.Status">@Model.Deployment.Status</span>
+</header>
+<p id="result">
+	@if (Model.Deployment.Url is not null)
+	{
+		<a class="live" href="@Model.Deployment.Url" target="_blank" rel="noopener noreferrer">@Model.Deployment.Url</a>
+	}
+	@if (Model.Deployment.Error is not null)
+	{
+		<span class="error">@Model.Deployment.Error</span>
+	}
+</p>
+<pre id="log" class="log" data-deployment="@Model.Deployment.Id" data-done="@(Model.Deployment.Status is DeploymentStatus.Succeeded or DeploymentStatus.Failed ? "true" : "false")">Loading log…</pre>
+@section Scripts {
+	<script src="~/js/deployment.js" asp-append-version="true"></script>
+}

@@ -1,0 +1,19 @@
+@page "/setup"
+@model SetupModel
+@{
+	ViewData["Title"] = "Set up Jfri";
+}
+<section class="card narrow">
+	<h1>Welcome to Jfri</h1>
+	<p>Create the admin account. To prove you run this server, enter the setup token from Jfri's startup log (or the <code>setup-token</code> file in its data directory).</p>
+	<form method="post">
+		<label>Setup token <input name="Token" autocomplete="off" required /></label>
+		<label>Username <input name="UserName" value="@Model.UserName" autocomplete="username" required maxlength="64" /></label>
+		<label>Password <small>(at least 12 characters)</small> <input name="Password" type="password" autocomplete="new-password" required minlength="12" /></label>
+		@if (Model.Error is not null)
+		{
+			<p class="error">@Model.Error</p>
+		}
+		<button type="submit" class="primary">Create admin</button>
+	</form>
+</section>

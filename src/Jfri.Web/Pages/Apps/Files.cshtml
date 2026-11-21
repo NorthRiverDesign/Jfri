@@ -1,0 +1,15 @@
+@page "/apps/{id:int}/files"
+@model Jfri.Web.Pages.Apps.FilesModel
+@{
+	ViewData["Title"] = $"{Model.App.Name} files";
+}
+<h1>Generated files</h1>
+<p class="muted">Everything Jfri runs for <a href="/apps/@Model.App.Id">@Model.App.Name</a>. Secrets are shown as <code>&lt;NAME&gt;</code> placeholders; real values only ever go to the server, in 0600 files.</p>
+<p><a class="button" href="/apps/@Model.App.Id/files?handler=Download">Download all (.zip)</a></p>
+@foreach (var file in Model.Files)
+{
+	<details class="file" open="@(file == Model.Files[0])">
+		<summary><code>@file.Path</code></summary>
+		<pre>@file.Content</pre>
+	</details>
+}

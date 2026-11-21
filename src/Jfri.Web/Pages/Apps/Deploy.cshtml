@@ -1,0 +1,103 @@
+@page "/apps/{id:int}/deploy"
+@model Jfri.Web.Pages.Apps.DeployModel
+@{
+	ViewData["Title"] = $"Deploy {Model.App.Name}";
+}
+<h1>Deploy @Model.App.Name</h1>
+<p class="muted">@Model.Plan.App.Framework on @(Model.Plan.Runtime == RuntimeKind.Kubernetes ? "Kubernetes (k3s)" : "Docker Compose") · needs about @Model.Plan.Resources</p>
+
+@if (Model.Error is not null)
+{
+	<p class="error">@Model.Error</p>
+}
+
+@if (Model.CurrentServer is { } current)
+{
+	<section class="card">
+		<h2>Redeploy to @current.Name</h2>
+		<p class="small">This app's server (@current.Host). Redeploying reuses it, along with its database, volumes and secrets.</p>
+		<form method="post">
+			<input type="hidden" name="Mode" value="existing" />
+			<input type="hidden" name="ServerId" value="@current.Id" />
+			<button type="submit" class="primary">Redeploy now</button>
+		</form>
+	</section>
+}
+
+@if (Model.Provider is null)
+{
+	<section class="card">
+		<h2>On a server you already have</h2>
+		@if (Model.Servers.Count == 0)
+		{
+			<p>No servers yet. <a href="/connections#servers">Add your server</a> (Jfri generates a key you put in <code>authorized_keys</code>), then come back.</p>
+		}
+		else
+		{
+			<form method="post">
+				<input type="hidden" name="Mode" value="existing" />
+				<label>Server
+					<select name="ServerId">
+						@foreach (var s in Model.Servers)
+						{
+							<option value="@s.Id">@s.Name (@s.Host@(s.Runtime is null ? "" : $", runs {s.Runtime}"))</option>
+						}
+					</select>
+				</label>
+				<p class="small muted">The server needs Ubuntu or Debian. Jfri turns on a firewall that allows only SSH (on the server's configured port), HTTP and HTTPS, plus automatic security updates and fail2ban.</p>
+				<button type="submit" class="primary">Deploy now</button>
+			</form>
+		}
+	</section>
+}
+else
+{
+	<section class="card">
+		<h2>New server on @Model.Provider.Name</h2>
+		<form method="post">
+			<input type="hidden" name="Mode" value="new" />
+			<input type="hidden" name="Provider" value="@Model.Provider.Id" />
+			<label>Size
+				<select name="Size">
+					@foreach (var t in Model.Sizes)
+					{
+						<option value="@t.Id" selected="@(t.Id == Model.SelectedSize)">@t.Name: @t.VCpu vCPU, @(t.MemoryMb / 1024.0) GB, @t.DiskGb GB, @t.MonthlyPrice.ToString("0.00") @Model.Currency/mo</option>
+					}
+				</select>
+			</label>
+			<label>Region
+				<select name="Region">
+					@foreach (var r in Model.Provider.Regions)
+					{
+						<option value="@r.Id" selected="@(r.Id == Model.Provider.DefaultRegion)">@r.Name (@r.Id)</option>
+					}
+				</select>
+			</label>
+			@if (Model.Connections.Count > 0)
+			{
+				<label>API token
+					<select name="ConnectionId">
+						@foreach (var c in Model.Connections)
+						{
+							<option value="@c.Id">@c.Name (@c.Hint)</option>
+						}
+					</select>
+				</label>
+			}
+			else
+			{
+				<label>@Model.Provider.Name API token <small>(stored encrypted, never shown again)</small>
+					<input name="Token" type="password" autocomplete="off" required />
+				</label>
+				<p class="small muted">Create one at @Model.Provider.TokenHelpUrl</p>
+			}
+			<label class="choice"><input type="checkbox" name="Backups" value="true" checked="@Model.Plan.Backups.ProviderBackups" /> Turn on @Model.Provider.Name backups</label>
+			<p class="small">Jfri creates an Ubuntu 24.04 server with its own SSH key, hardens it (firewall, automatic security updates, fail2ban), installs @(Model.Plan.Runtime == RuntimeKind.Kubernetes ? "k3s" : "Docker"), builds your app on it and serves it over HTTPS. The server is billed to your @Model.Provider.Name account.</p>
+			<button type="submit" class="primary">Create server and deploy</button>
+		</form>
+	</section>
+	@if (Model.Servers.Count > 0)
+	{
+		<p class="small"><a href="/apps/@Model.App.Id/deploy?provider=ssh">Or deploy to a server Jfri already manages</a></p>
+	}
+}

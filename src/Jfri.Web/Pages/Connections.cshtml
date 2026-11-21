@@ -1,0 +1,82 @@
+@page "/connections"
+@model ConnectionsModel
+@{
+	ViewData["Title"] = "Connections";
+}
+<h1>Connections</h1>
+@if (Model.Error is not null)
+{
+	<p class="error">@Model.Error</p>
+}
+@if (Model.NewPublicKey is not null)
+{
+	<section class="card">
+		<h2>Authorize Jfri on your server</h2>
+		<p>Add this line to <code>~/.ssh/authorized_keys</code> for the user you entered (root, or a user with passwordless sudo), then deploy:</p>
+		<pre class="wrap">@Model.NewPublicKey</pre>
+	</section>
+}
+
+<section class="card">
+	<h2>Hosting providers</h2>
+	<p class="small muted">API tokens let Jfri create servers and show live prices. They're encrypted at rest and never displayed again.</p>
+	@if (Model.Connections.Count > 0)
+	{
+		<ul class="list">
+			@foreach (var c in Model.Connections)
+			{
+				<li class="row">
+					<span><strong>@(ProviderCatalog.Find(c.Provider)?.Name ?? c.Provider)</strong> <small class="muted">@c.Name · @c.Hint</small></span>
+					<form method="post" asp-page-handler="DeleteConnection"><input type="hidden" name="id" value="@c.Id" /><button type="submit" class="link danger">Remove</button></form>
+				</li>
+			}
+		</ul>
+	}
+	<form method="post" asp-page-handler="AddConnection">
+		<label>Provider
+			<select name="Provider">
+				@foreach (var p in ProviderCatalog.All)
+				{
+					<option value="@p.Id">@p.Name</option>
+				}
+			</select>
+		</label>
+		<label>Name <input name="Name" placeholder="Personal account" maxlength="80" /></label>
+		<label>API token <input name="Token" type="password" autocomplete="off" required /></label>
+		<button type="submit">Save token</button>
+	</form>
+</section>
+
+<section class="card" id="servers">
+	<h2>Servers</h2>
+	@if (Model.Servers.Count > 0)
+	{
+		<ul class="list">
+			@foreach (var s in Model.Servers)
+			{
+				<li class="row">
+					<span><strong>@s.Name</strong> <small class="muted">@(s.Host == "" ? "(no address yet)" : s.Host) · @s.Provider@(s.Size is null ? "" : $" {s.Size}") · @(s.Runtime ?? "not set up yet") · @s.Status</small></span>
+					<form method="post" asp-page-handler="DeleteServer">
+						<input type="hidden" name="id" value="@s.Id" />
+						@if (s.Provider != "ssh" && s.ProviderServerId is not null)
+						{
+							<label class="choice small"><input type="checkbox" name="destroy" value="true" /> also destroy it at @s.Provider</label>
+						}
+						<button type="submit" class="link danger">Remove</button>
+					</form>
+				</li>
+			}
+		</ul>
+	}
+	<h3>Add your own server</h3>
+	<form method="post" asp-page-handler="AddServer">
+		<label>Name <input name="Name" placeholder="my-vps" maxlength="60" required /></label>
+		<label>Address <input name="Host" placeholder="203.0.113.10 or vps.example.com" required /></label>
+		<label>SSH port <input name="Port" type="number" value="22" min="1" max="65535" /></label>
+		<label>User <input name="User" value="root" maxlength="32" /></label>
+		<label>Private key <small>(optional: leave empty and Jfri generates one for you to authorize)</small>
+			<textarea name="PrivateKey" rows="3" autocomplete="off" spellcheck="false"></textarea>
+		</label>
+		<button type="submit">Add server</button>
+	</form>
+</section>

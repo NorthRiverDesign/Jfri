@@ -1,0 +1,27 @@
+# Run Jfri itself, behind Caddy for automatic HTTPS:
+#   JFRI_DOMAIN=jfri.example.com docker compose up -d
+#   docker compose logs jfri | grep "setup token"
+services:
+  jfri:
+    build: .
+    restart: unless-stopped
+    environment:
+      JFRI_TRUST_PROXY: "true"
+    volumes:
+      - jfri-data:/data
+    security_opt: ["no-new-privileges:true"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    command: ["caddy", "reverse-proxy", "--from", "${JFRI_DOMAIN:-localhost}", "--to", "jfri:8080"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+    depends_on: ["jfri"]
+
+volumes:
+  jfri-data: {}
+  caddy-data: {}

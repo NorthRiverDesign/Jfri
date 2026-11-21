@@ -1,0 +1,11 @@
+<Solution>
+	<Folder Name="/src/">
+		<Project Path="src/Jfri.Core/Jfri.Core.csproj" />
+		<Project Path="src/Jfri.Web/Jfri.Web.csproj" />
+		<Project Path="src/Jfri.Cli/Jfri.Cli.csproj" />
+	</Folder>
+	<Folder Name="/tests/">
+		<Project Path="tests/Jfri.Core.Tests/Jfri.Core.Tests.csproj" />
+		<Project Path="tests/Jfri.Web.Tests/Jfri.Web.Tests.csproj" />
+	</Folder>
+</Solution>

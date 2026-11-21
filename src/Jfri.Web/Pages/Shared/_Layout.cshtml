@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="color-scheme" content="light dark" />
+	<title>@(ViewData["Title"] is string t ? $"{t} · Jfri" : "Jfri")</title>
+	<link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+	<header class="top">
+		<a class="brand" href="/">Jfri<span class="tag">just run it</span></a>
+		@if (User.Identity?.IsAuthenticated == true)
+		{
+			<nav>
+				<a href="/">Apps</a>
+				<a href="/connections">Connections</a>
+				<form method="post" action="/logout" class="inline">
+					<button type="submit" class="link">Sign out</button>
+				</form>
+			</nav>
+		}
+	</header>
+	<main>
+		@if (TempData["Message"] is string message)
+		{
+			<p class="flash">@message</p>
+		}
+		@RenderBody()
+	</main>
+	<footer>Jfri: repository in, production out. Open source (MIT).</footer>
+	@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

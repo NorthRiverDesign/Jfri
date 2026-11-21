@@ -1,0 +1,210 @@
+@page "/apps/{id:int}"
+@model Jfri.Web.Pages.Apps.DetailsModel
+@{
+	ViewData["Title"] = Model.App.Name;
+	var profile = Model.Profile;
+	var app = profile.App;
+	var plan = Model.Plan;
+	var options = Model.Options;
+}
+<header class="page-head">
+	<div>
+		<h1>@Model.App.Name</h1>
+		<p class="muted small">@Model.App.RepoUrl @(Model.App.Branch is null ? "" : $"· {Model.App.Branch}") @(Model.App.Commit is null ? "" : $"· {Model.App.Commit[..Math.Min(8, Model.App.Commit.Length)]}")</p>
+		@if (Model.App.LiveUrl is not null)
+		{
+			<p><a class="live" href="@Model.App.LiveUrl" target="_blank" rel="noopener noreferrer">@Model.App.LiveUrl</a></p>
+		}
+	</div>
+	<div class="actions">
+		@if (Model.App.ServerId is not null && plan is not null)
+		{
+			<a class="button primary" href="/apps/@Model.App.Id/deploy">Redeploy</a>
+		}
+		<form method="post" asp-page-handler="Analyze"><button type="submit">Re-analyze</button></form>
+	</div>
+</header>
+
+@if (Model.Error is not null)
+{
+	<p class="error">@Model.Error</p>
+}
+
+@if (app is null)
+{
+	<section class="card">
+		<h2>Jfri couldn't find something to deploy</h2>
+		<ul>
+			@foreach (var observation in profile.Observations)
+			{
+				<li>@observation</li>
+			}
+		</ul>
+	</section>
+}
+else
+{
+	<section class="card">
+		<h2>What Jfri found</h2>
+		<dl class="facts">
+			<dt>App</dt><dd>@app.Framework <span class="muted">(@app.Stack @app.RuntimeVersion)</span></dd>
+			<dt>Build</dt><dd>@(app.BuildStrategy == BuildStrategy.ExistingDockerfile ? $"your {app.DockerfilePath}" : "generated Dockerfile")</dd>
+			<dt>Listens on</dt><dd>port @app.Port@(app.HealthCheckPath is null ? "" : $", health check {app.HealthCheckPath}")</dd>
+			<dt>Processes</dt><dd>@string.Join(", ", app.Processes.Select(p => p.Name))</dd>
+			@if (app.ReleaseCommand is not null)
+			{
+				<dt>On release</dt><dd><code>@app.ReleaseCommand</code></dd>
+			}
+			<dt>Needs</dt>
+			<dd>
+				@if (profile.Services.Count == 0)
+				{
+					<span>no database or cache</span>
+				}
+				@foreach (var service in profile.Services)
+				{
+					<details class="evidence">
+						<summary>@service.Kind @service.Version <span class="badge @service.Confidence.ToString().ToLowerInvariant()">@service.Confidence</span></summary>
+						<ul>@foreach (var e in service.Evidence) { <li><code>@e.File</code>: @e.Detail</li> }</ul>
+					</details>
+				}
+			</dd>
+		</dl>
+		<details>
+			<summary>Evidence (@app.Evidence.Count)</summary>
+			<ul class="small">@foreach (var e in app.Evidence) { <li><code>@e.File</code>: @e.Detail</li> }</ul>
+		</details>
+		@if (profile.OtherApps.Count > 0)
+		{
+			<p class="muted small">Also found: @string.Join(", ", profile.OtherApps.Select(o => $"{o.Framework} in {o.EntryProject ?? (o.RootPath.Length > 0 ? o.RootPath : "root")}"))</p>
+		}
+	</section>
+}
+
+@if (plan is not null)
+{
+	<section class="card">
+		<h2>What Jfri will set up</h2>
+		<ul class="decisions">
+			@foreach (var decision in plan.Decisions)
+			{
+				<li>@decision</li>
+			}
+		</ul>
+		@foreach (var warning in plan.Warnings)
+		{
+			<p class="warning">@warning</p>
+		}
+		@if (plan.UnsetEnvironment.Count > 0)
+		{
+			<details>
+				<summary>@plan.UnsetEnvironment.Count other settings your app reads</summary>
+				<p class="small muted">Jfri leaves these to your app's defaults. Set any you need below.</p>
+				<p class="small"><code>@string.Join(", ", plan.UnsetEnvironment)</code></p>
+			</details>
+		}
+		<details>
+			<summary>Adjust the plan</summary>
+			<form method="post" asp-page-handler="Options" class="options">
+				<fieldset>
+					<legend>Runtime</legend>
+					<label class="choice"><input type="radio" name="Runtime" value="Kubernetes" checked="@(options.Runtime == RuntimeKind.Kubernetes)" /> Kubernetes (k3s): rolling deploys, self-healing</label>
+					<label class="choice"><input type="radio" name="Runtime" value="Compose" checked="@(options.Runtime == RuntimeKind.Compose)" /> Docker Compose: lighter, fits smaller servers</label>
+				</fieldset>
+				<label>Domain <small>(optional; point its DNS A record at the server)</small> <input name="Domain" value="@options.Domain" placeholder="app.example.com" /></label>
+				<label>Let's Encrypt e-mail <small>(optional)</small> <input name="AcmeEmail" type="email" value="@options.AcmeEmail" /></label>
+				<label>Database disk (GB) <input name="DatabaseStorageGb" type="number" min="1" max="500" value="@options.DatabaseStorageGb" /></label>
+				<label class="choice"><input type="checkbox" name="ProviderBackups" value="true" checked="@options.ProviderBackups" /> Provider whole-server backups</label>
+				<label>Extra environment <small>(KEY=value per line, not secret)</small><textarea name="ExtraEnvironment" rows="3">@string.Join("\n", options.ExtraEnvironment.Select(kv => $"{kv.Key}={kv.Value}"))</textarea></label>
+				<button type="submit">Save plan</button>
+			</form>
+		</details>
+		<p><a href="/apps/@Model.App.Id/files">See the generated files</a></p>
+	</section>
+
+	<section>
+		<h2>Monthly cost</h2>
+		<p class="muted small">One server sized for this app: about @plan.Resources. Prices exclude tax.</p>
+		<div class="quotes">
+			@foreach (var quote in Model.Quotes)
+			{
+				<article class="card quote">
+					<header>
+						<h3>@quote.Provider.Name</h3>
+						<span class="price">@Money(quote.Total, quote.Currency)<small>/mo</small></span>
+					</header>
+					<ul class="small">
+						@foreach (var line in quote.Lines)
+						{
+							<li>@line.Label: @Money(line.Monthly, quote.Currency)</li>
+						}
+					</ul>
+					<p class="small muted">@(quote.Live ? $"Live price, {quote.AsOf}" : $"Catalog price, {quote.AsOf}")@(quote.Minimum is null ? "" : $" · tight fit: {quote.Minimum.Name} at {Money(quote.Minimum.MonthlyPrice, quote.Currency)}")</p>
+					@foreach (var note in quote.Notes)
+					{
+						<p class="small muted">@note</p>
+					}
+					<a class="button primary" href="/apps/@Model.App.Id/deploy?provider=@quote.Provider.Id&size=@quote.Server.Id">Deploy on @quote.Provider.Name</a>
+				</article>
+			}
+			<article class="card quote">
+				<header>
+					<h3>Your own server</h3>
+					<span class="price">@Money(0, "USD")<small> extra</small></span>
+				</header>
+				<p class="small">Any Ubuntu/Debian server you can SSH into as root (or with passwordless sudo), with at least @(plan.Resources.MemoryMb / 1024.0)GB RAM.</p>
+				<a class="button" href="/apps/@Model.App.Id/deploy?provider=ssh">Deploy on my server</a>
+			</article>
+		</div>
+	</section>
+}
+
+@if (Model.Deployments.Count > 0)
+{
+	<section>
+		<h2>Deployments</h2>
+		<ul class="list">
+			@foreach (var d in Model.Deployments)
+			{
+				<li>
+					<a class="row" href="/deployments/@d.Id">
+						<span>#@d.Id <small class="muted">@d.CreatedAt.ToString("u") · @d.Trigger @(d.Commit is null ? "" : $"· {d.Commit[..Math.Min(8, d.Commit.Length)]}")</small></span>
+						<span class="badge @d.Status">@d.Status</span>
+					</a>
+				</li>
+			}
+		</ul>
+	</section>
+}
+
+@if (plan is not null)
+{
+	<section class="card">
+		<h2>Push to deploy</h2>
+		<p class="small">Jfri generated a GitHub Actions workflow (<code>.github/workflows/jfri.yml</code>, on the files page) that runs your tests and then asks Jfri to deploy. Or add a GitHub webhook for push events with these values directly.</p>
+		<dl class="facts">
+			<dt>JFRI_DEPLOY_URL</dt><dd><code>@Model.WebhookUrl</code></dd>
+			<dt>JFRI_WEBHOOK_SECRET</dt>
+			<dd>
+				<details><summary>Show</summary><code class="secret">@Model.WebhookSecret</code></details>
+			</dd>
+		</dl>
+		<p class="small muted">Jfri must be reachable from GitHub at that URL. Webhook deploys go to the server of the last deploy.</p>
+	</section>
+}
+
+<section class="danger-zone">
+	<form method="post" asp-page-handler="Delete" class="confirm">
+		<button type="submit" class="danger">Remove app from Jfri</button>
+		<span class="small muted">Doesn't touch running servers.</span>
+	</form>
+</section>
+
+@functions {
+	static string Money(decimal amount, string currency) => currency switch
+	{
+		"EUR" => $"€{amount:0.00}",
+		"USD" => $"${amount:0.00}",
+		_ => $"{amount:0.00} {currency}",
+	};
+}
