@@ -5,8 +5,8 @@
 }
 <header class="page-head">
 	<div>
-		<h1>Deployment #@Model.Deployment.Id</h1>
-		<p class="muted small"><a href="/apps/@Model.App.Id">@Model.App.Name</a> · @Model.Deployment.Trigger · @Model.Deployment.CreatedAt.ToString("u")</p>
+		<h1>@(Model.Deployment.Kind switch { DeploymentKind.Rollback => "Rollback", DeploymentKind.Teardown => "Take-down", _ => "Deployment" }) #@Model.Deployment.Id</h1>
+		<p class="muted small"><a href="/apps/@Model.App.Id">@Model.App.Name</a> · @Model.Deployment.Trigger · @Model.Deployment.CreatedAt.ToString("u")@(Model.Deployment.Revision is null ? "" : $" · {Model.Deployment.Revision}")</p>
 	</div>
 	<span id="status" class="badge @Model.Deployment.Status">@Model.Deployment.Status</span>
 </header>
@@ -20,6 +20,13 @@
 		<span class="error">@Model.Deployment.Error</span>
 	}
 </p>
+@if (Model.CanRollBack)
+{
+	<form method="post" asp-page-handler="Rollback" class="card">
+		<p class="small">Put this build back with the settings it was released with. Nothing is rebuilt, so it takes seconds. Database migrations aren't undone, and the next push still deploys the branch head.</p>
+		<button type="submit">Roll back to this build</button>
+	</form>
+}
 <pre id="log" class="log" data-deployment="@Model.Deployment.Id" data-done="@(Model.Deployment.Status is DeploymentStatus.Succeeded or DeploymentStatus.Failed ? "true" : "false")">Loading log…</pre>
 @section Scripts {
 	<script src="~/js/deployment.js" asp-append-version="true"></script>

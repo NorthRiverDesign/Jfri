@@ -153,7 +153,14 @@ namespace Jfri.Web.Data.Migrations
                     b.Property<DateTime?>("FinishedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("NewServerJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlanJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Revision")

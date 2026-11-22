@@ -61,6 +61,8 @@ public sealed class PlannerTests
 	[InlineData("My Great App!", "my-great-app")]
 	[InlineData("123", "app-123")]
 	[InlineData("--", "app")]
+	[InlineData("kube-system", "app-kube-system")]
+	[InlineData("Default", "app-default")]
 	public void Names_are_dns_safe(string input, string expected)
 	{
 		Assert.Equal(expected, Planner.Slug(input));
@@ -252,5 +254,25 @@ public sealed class GeneratorTests
 		Assert.Contains("unattended-upgrades", script);
 		Assert.Contains("acme.email=ops@example.com", script);
 		Assert.DoesNotContain("6443", script);
+	}
+
+	[Theory]
+	[InlineData("laravel-mysql")]
+	[InlineData("django-celery")]
+	[InlineData("aspnet-postgres")]
+	[InlineData("laravel-sqlite")]
+	public void A_saved_plan_renders_the_same_files_after_loading(string fixture)
+	{
+		// Rollbacks render from the plan saved with the deployment, so it must survive a round trip.
+		foreach (var runtime in new[] { RuntimeKind.Kubernetes, RuntimeKind.Compose })
+		{
+			var plan = Fixtures.Plan(fixture, runtime, "shop.example.com");
+			var loaded = System.Text.Json.JsonSerializer.Deserialize<DeploymentPlan>(System.Text.Json.JsonSerializer.Serialize(plan, ArtifactBuilder.JsonOptions), ArtifactBuilder.JsonOptions)!;
+			var context = new RenderContext("shop.example.com", "rev1", SecretGenerator.Fill(plan.Secrets, null));
+
+			var expected = ArtifactBuilder.Build(plan, context);
+			var actual = ArtifactBuilder.Build(loaded, context);
+			Assert.Equal(expected.Select(a => (a.Path, a.Content, a.Mode)), actual.Select(a => (a.Path, a.Content, a.Mode)));
+		}
 	}
 }

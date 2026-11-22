@@ -104,18 +104,36 @@ public static class DeploymentStatus
 	public const string Failed = "failed";
 }
 
+public static class DeploymentKind
+{
+	/// <summary>Fetch, build and release the branch head.</summary>
+	public const string Deploy = "deploy";
+	/// <summary>Release an earlier build that's still on the server (no fetch, no build).</summary>
+	public const string Rollback = "rollback";
+	/// <summary>Delete the app from its server (containers, database, volumes; backups are kept).</summary>
+	public const string Teardown = "teardown";
+}
+
 public sealed class Deployment
 {
 	public int Id { get; set; }
 	public int AppId { get; set; }
 	public int? ServerId { get; set; }
 	public string Status { get; set; } = DeploymentStatus.Queued;
+	/// <summary>What this run does: see <see cref="DeploymentKind"/>.</summary>
+	public string Kind { get; set; } = DeploymentKind.Deploy;
 	/// <summary>manual or webhook.</summary>
 	public string Trigger { get; set; } = "manual";
 	/// <summary>When creating a new server: provider, connection, region, size, backups (JSON).</summary>
 	public string? NewServerJson { get; set; }
 	public string? Commit { get; set; }
+	/// <summary>Image tag and release id. Set when queued for a rollback (the build to put back).</summary>
 	public string? Revision { get; set; }
+	/// <summary>
+	/// Serialized <see cref="Jfri.Core.Planning.DeploymentPlan"/> this revision was released with, so a
+	/// rollback pairs the old image with the processes, port and settings it was built for.
+	/// </summary>
+	public string? PlanJson { get; set; }
 	public string? Url { get; set; }
 	public string? Error { get; set; }
 	public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

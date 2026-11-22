@@ -130,7 +130,7 @@ public static partial class Planner
 		}
 		if (string.IsNullOrWhiteSpace(options.Domain))
 		{
-			decisions.Add("Address: <server-ip>.sslip.io until you point a domain at the server, so HTTPS works from the first deploy.");
+			decisions.Add("Address: <app>.<server-ip>.sslip.io until you point a domain at the server, so HTTPS works from the first deploy.");
 		}
 
 		var plan = new DeploymentPlan
@@ -497,7 +497,7 @@ public static partial class Planner
 		{
 			return "app";
 		}
-		if (!char.IsAsciiLetter(slug[0]))
+		if (!char.IsAsciiLetter(slug[0]) || IsReserved(slug))
 		{
 			slug = "app-" + slug;
 		}
@@ -505,7 +505,13 @@ public static partial class Planner
 		return slug;
 	}
 
-	public static bool IsValidSlug(string value) => ValidSlugRegex().IsMatch(value);
+	public static bool IsValidSlug(string value) => ValidSlugRegex().IsMatch(value) && !IsReserved(value);
+
+	/// <summary>
+	/// The app name is also its Kubernetes namespace: an app called "kube-system" would get default-deny
+	/// network policies applied to the cluster's own DNS and ingress.
+	/// </summary>
+	static bool IsReserved(string slug) => slug is "default" || slug.StartsWith("kube-", StringComparison.Ordinal);
 
 	[GeneratedRegex("[^a-z0-9]+")]
 	private static partial Regex SlugRegex();

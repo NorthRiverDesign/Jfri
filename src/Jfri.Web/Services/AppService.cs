@@ -118,7 +118,9 @@ public sealed class AppService(JfriDb db, Vault vault, JfriPaths paths, PricingC
 		var name = baseName;
 		for (var i = 2; await db.Apps.AnyAsync(a => a.Name == name, ct); i++)
 		{
-			name = Planner.Slug($"{baseName}-{i}");
+			// Leave room for the suffix: Slug truncates to 40 characters, which would cut it off again.
+			var suffix = $"-{i}";
+			name = Planner.Slug(baseName[..Math.Min(baseName.Length, 40 - suffix.Length)].TrimEnd('-') + suffix);
 		}
 		return name;
 	}

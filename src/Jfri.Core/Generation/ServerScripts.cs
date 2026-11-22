@@ -128,6 +128,112 @@ public static class ServerScripts
 		return sb.ToString();
 	}
 
+	/// <summary>
+	/// Makes sure an earlier build is still on the server before a rollback changes anything. Docker
+	/// keeps the last three builds; k3s keeps its own copy until its image garbage collection runs.
+	/// </summary>
+	public static string CheckImage(DeploymentPlan plan, string revision)
+	{
+		var image = $"{plan.ImageRepository}:{revision}";
+		var sb = new StringBuilder();
+		sb.AppendLine("#!/usr/bin/env bash");
+		sb.AppendLine("set -euo pipefail");
+		sb.AppendLine("if [ \"$(id -u)\" -ne 0 ]; then SUDO=sudo; else SUDO=; fi");
+		sb.AppendLine($"image={image}");
+		sb.AppendLine("echo \"==> Looking for $image\"");
+		if (plan.Runtime == RuntimeKind.Kubernetes)
+		{
+			// No grep -q: it exits at the first match, and pipefail would then fail on ctr's broken pipe.
+			sb.AppendLine("if $SUDO k3s ctr -n k8s.io images ls -q | grep -Fx \"docker.io/$image\" >/dev/null; then echo 'Found it in k3s.'; exit 0; fi");
+			sb.AppendLine("if $SUDO docker image inspect \"$image\" >/dev/null 2>&1; then");
+			sb.AppendLine("  echo 'Loading it into k3s'");
+			sb.AppendLine("  $SUDO docker save \"$image\" | $SUDO k3s ctr -n k8s.io images import - >/dev/null");
+			sb.AppendLine("  exit 0");
+			sb.AppendLine("fi");
+		}
+		else
+		{
+			sb.AppendLine("if $SUDO docker image inspect \"$image\" >/dev/null 2>&1; then echo 'Found it.'; exit 0; fi");
+		}
+		sb.AppendLine($"echo 'The build of {revision} is no longer on the server (Jfri keeps the last three). Deploy that commit again instead.' >&2");
+		sb.AppendLine("exit 1");
+		return sb.ToString();
+	}
+
+	/// <summary>Runs the uploaded deploy script for an image that's already on the server.</summary>
+	public static string Release(DeploymentPlan plan, string revision)
+	{
+		var runtimeDir = plan.Runtime == RuntimeKind.Kubernetes ? "k8s" : "compose";
+		return $"""
+			#!/usr/bin/env bash
+			set -euo pipefail
+			if [ "$(id -u)" -ne 0 ]; then SUDO=sudo; else SUDO=; fi
+			echo '==> Releasing {revision}'
+			$SUDO env JFRI_REVISION={revision} bash {AppDir(plan.AppName)}/{runtimeDir}/deploy.sh
+
+			""";
+	}
+
+	/// <summary>
+	/// Removes an app from a server: its Kubernetes namespace or Compose project with the database and
+	/// volumes, its images and its files. Backups are kept in /var/lib/jfri/backups/&lt;app&gt;; on
+	/// Kubernetes they live in a volume inside the namespace, so they're copied out first, and nothing is
+	/// deleted if that copy fails. Works whichever runtime the app used, and on half-deployed apps.
+	/// </summary>
+	public static string Teardown(string appName)
+	{
+		if (!Planner.IsValidSlug(appName))
+		{
+			throw new ArgumentException($"Invalid app name {appName}.", nameof(appName));
+		}
+		return $$"""
+			#!/usr/bin/env bash
+			set -euo pipefail
+			if [ "$(id -u)" -ne 0 ]; then SUDO=sudo; else SUDO=; fi
+			name={{appName}}
+			app={{AppDir(appName)}}
+			keep=/var/lib/jfri/backups/$name
+			if command -v k3s >/dev/null 2>&1 && $SUDO k3s kubectl get namespace "$name" >/dev/null 2>&1; then
+			  managed=$($SUDO k3s kubectl get namespace "$name" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}')
+			  if [ "$managed" != "jfri" ]; then
+			    echo "Namespace $name wasn't created by Jfri; leaving it alone." >&2
+			    exit 1
+			  fi
+			  # Any error other than "no such volume claim" stops the script: the backups must not go with the namespace.
+			  pv=$($SUDO k3s kubectl -n "$name" get pvc backups --ignore-not-found -o jsonpath='{.spec.volumeName}')
+			  if [ -n "$pv" ]; then
+			    path=$($SUDO k3s kubectl get pv "$pv" -o jsonpath='{.spec.local.path}{.spec.hostPath.path}')
+			    if [ -z "$path" ] || ! $SUDO test -d "$path"; then
+			      echo "Couldn't find the backups volume ($pv) on disk, so nothing was deleted." >&2
+			      exit 1
+			    fi
+			    echo "==> Keeping the backups in $keep"
+			    $SUDO mkdir -p "$keep"
+			    $SUDO cp -a "$path/." "$keep/"
+			  fi
+			  echo "==> Deleting namespace $name (app, database, volumes)"
+			  $SUDO k3s kubectl delete namespace "$name" --timeout=300s
+			  $SUDO k3s ctr -n k8s.io images ls -q | grep -F "docker.io/jfri/$name:" | xargs -r $SUDO k3s ctr -n k8s.io images rm >/dev/null 2>&1 || true
+			fi
+			if command -v docker >/dev/null 2>&1; then
+			  if [ -f "$app/compose/compose.yaml" ]; then
+			    echo "==> Stopping the containers and deleting their volumes"
+			    $SUDO docker compose -f "$app/compose/compose.yaml" down --volumes --remove-orphans --timeout 30
+			  elif [ -n "$($SUDO docker ps -aq --filter "label=com.docker.compose.project=$name")" ]; then
+			    echo "==> Stopping the containers and deleting their volumes"
+			    $SUDO docker compose -p "$name" down --volumes --remove-orphans --timeout 30
+			  fi
+			  $SUDO docker volume ls -q --filter "label=com.docker.compose.project=$name" | xargs -r $SUDO docker volume rm >/dev/null
+			  $SUDO docker images "jfri/$name" -q | sort -u | xargs -r $SUDO docker rmi -f >/dev/null 2>&1 || true
+			fi
+			echo "==> Deleting $app"
+			$SUDO rm -rf "$app"
+			if $SUDO test -d "$keep"; then echo "Backups are kept in $keep."; fi
+			echo "Removed $name from this server."
+
+			""";
+	}
+
 	/// <summary>Checks the app answers through the public proxy (from the server itself, with the right Host header).</summary>
 	public static string Verify(DeploymentPlan plan, string host)
 	{

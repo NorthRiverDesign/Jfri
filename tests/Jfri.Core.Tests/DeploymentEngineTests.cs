@@ -174,4 +174,78 @@ public sealed class SourceTests
 			dir.Delete(recursive: true);
 		}
 	}
+
+	[Fact]
+	public async Task Rollback_puts_an_earlier_build_back_without_uploading_or_building()
+	{
+		var plan = Fixtures.Plan("laravel-mysql");
+		var secrets = SecretGenerator.Fill(plan.Secrets, null);
+		var host = new FakeRemoteHost();
+		var log = new List<string>();
+		var request = new DeploymentRequest { Plan = plan, Revision = "old123-20261120t080000", Secrets = secrets, Host = "203-0-113-7.sslip.io" };
+
+		var url = await new DeploymentEngine().RollbackAsync(request, host, log.Add, CancellationToken.None);
+
+		Assert.Equal("https://203-0-113-7.sslip.io", url);
+		Assert.Equal(
+			["==> Checking the earlier build is still on the server", "==> Uploading the configuration", "==> Releasing", "==> Checking the app answers over HTTPS"],
+			log.Where(l => l.StartsWith("==>", StringComparison.Ordinal)));
+		Assert.Contains("image=jfri/laravel-mysql:old123-20261120t080000", host.Scripts[0]);
+		Assert.All(host.Scripts, s => Assert.DoesNotContain("docker build", s));
+		Assert.All(host.Scripts, s => Assert.DoesNotContain("bootstrap", s));
+		Assert.DoesNotContain(host.Files.Keys, k => k.EndsWith("source.tar.gz", StringComparison.Ordinal) || k.Contains("/overlay/", StringComparison.Ordinal));
+		// The manifests are rendered for the old revision, and the release runs it.
+		Assert.Contains("image: jfri/laravel-mysql:old123-20261120t080000", host.Files["/opt/jfri/apps/laravel-mysql/k8s/40-app.yaml"].Content);
+		Assert.Contains("JFRI_REVISION=old123-20261120t080000 bash /opt/jfri/apps/laravel-mysql/k8s/deploy.sh", host.Scripts[^2]);
+		Assert.Equal("0600", host.Files["/opt/jfri/apps/laravel-mysql/k8s/10-secrets.yaml"].Mode);
+	}
+
+	[Fact]
+	public async Task Rollback_changes_nothing_when_the_build_is_gone()
+	{
+		var plan = Fixtures.Plan("static-site", RuntimeKind.Compose);
+		var host = new FakeRemoteHost();
+		host.FailWhen["image=jfri/static-site:"] = 1;
+		var request = new DeploymentRequest { Plan = plan, Revision = "gone-rev", Secrets = new Dictionary<string, string>(), Host = "shop.example.com" };
+
+		var error = await Assert.ThrowsAsync<DeploymentFailedException>(() => new DeploymentEngine().RollbackAsync(request, host, _ => { }, CancellationToken.None));
+
+		Assert.Equal("Checking the earlier build is still on the server", error.Step);
+		Assert.Single(host.Scripts);
+		Assert.Empty(host.Files);
+	}
+
+	[Fact]
+	public async Task A_deployment_needs_the_source_but_a_rollback_does_not()
+	{
+		var plan = Fixtures.Plan("static-site");
+		var request = new DeploymentRequest { Plan = plan, Revision = "abc", Secrets = new Dictionary<string, string>(), Host = "shop.example.com" };
+
+		await Assert.ThrowsAsync<ArgumentException>(() => new DeploymentEngine().DeployAsync(request, new FakeRemoteHost(), _ => { }, CancellationToken.None));
+	}
+
+	[Fact]
+	public async Task Teardown_runs_one_script_for_the_app()
+	{
+		var host = new FakeRemoteHost();
+		var log = new List<string>();
+
+		await new DeploymentEngine().TeardownAsync("shop", host, log.Add, CancellationToken.None);
+
+		Assert.Equal(["==> Removing shop from the server"], log.Where(l => l.StartsWith("==>", StringComparison.Ordinal)));
+		var script = Assert.Single(host.Scripts);
+		Assert.Contains("name=shop", script);
+		Assert.Contains("kubectl delete namespace \"$name\"", script);
+		Assert.Contains("down --volumes", script);
+		Assert.Empty(host.Files);
+		await Assert.ThrowsAsync<ArgumentException>(() => new DeploymentEngine().TeardownAsync("kube-system", host, _ => { }, CancellationToken.None));
+	}
+
+	[Theory]
+	[InlineData(null, "203.0.113.7", "shop", "shop.203-0-113-7.sslip.io")]
+	[InlineData(null, "2001:db8::1", "shop", "shop.2001-db8--1.sslip.io")]
+	[InlineData("shop.example.com", "203.0.113.7", "shop", "shop.example.com")]
+	[InlineData(null, "box.example.net", "shop", "box.example.net")]
+	public void Apps_get_their_own_address_on_a_shared_server(string? domain, string serverHost, string app, string expected) =>
+		Assert.Equal(expected, DeploymentEngine.PublicHost(domain, serverHost, app));
 }

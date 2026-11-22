@@ -31,7 +31,7 @@ public enum SecretKind
 public sealed class PlanOptions
 {
 	public RuntimeKind Runtime { get; set; } = RuntimeKind.Kubernetes;
-	/// <summary>Public hostname. When empty Jfri uses &lt;server-ip&gt;.sslip.io so HTTPS works before DNS is set up.</summary>
+	/// <summary>Public hostname. When empty Jfri uses &lt;app&gt;.&lt;server-ip&gt;.sslip.io so HTTPS works before DNS is set up.</summary>
 	public string? Domain { get; set; }
 	/// <summary>Contact e-mail for Let's Encrypt.</summary>
 	public string? AcmeEmail { get; set; }

@@ -68,7 +68,8 @@ nav a { text-decoration: none; }
 .warning { color: var(--warn); border-left: 3px solid var(--warn); padding-left: .6rem; }
 
 form { display: grid; gap: .75rem; }
-form.inline, form.confirm { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+form.inline { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.confirm { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; }
 label { display: grid; gap: .25rem; font-weight: 600; font-size: .92rem; }
 label small { font-weight: 400; color: var(--muted); }
 label.choice { display: flex; gap: .5rem; align-items: center; font-weight: 400; }

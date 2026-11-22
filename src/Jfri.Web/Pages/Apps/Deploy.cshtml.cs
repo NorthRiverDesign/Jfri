@@ -20,6 +20,8 @@ public sealed class DeployModel(JfriDb db, AppService apps, Vault vault, Deploym
 	public List<Server> Servers { get; private set; } = [];
 	/// <summary>The server this app already runs on (or was being set up on), if any.</summary>
 	public Server? CurrentServer { get; private set; }
+	/// <summary>Servers this app can't go on, with the reason.</summary>
+	public Dictionary<int, string> Problems { get; private set; } = [];
 	public string? Error { get; private set; }
 
 	public async Task<IActionResult> OnGetAsync(int id, string? provider, string? size, CancellationToken ct) =>
@@ -38,6 +40,11 @@ public sealed class DeployModel(JfriDb db, AppService apps, Vault vault, Deploym
 			if (server is null)
 			{
 				Error = "Pick a server.";
+				return Page();
+			}
+			if (Problems.TryGetValue(server.Id, out var problem))
+			{
+				Error = problem;
 				return Page();
 			}
 			var queued = await scheduler.QueueAsync(app, server.Id, null, "manual", ct);
@@ -91,6 +98,13 @@ public sealed class DeployModel(JfriDb db, AppService apps, Vault vault, Deploym
 		Plan = plan;
 		Servers = await db.Servers.AsNoTracking().Where(s => s.Status == ServerStatus.Ready && s.Host != "").OrderBy(s => s.Name).ToListAsync(ct);
 		CurrentServer = Servers.FirstOrDefault(s => s.Id == app.ServerId);
+		foreach (var server in Servers)
+		{
+			if (await ServerPlacement.ProblemAsync(db, app, plan, server, ct) is { } problem)
+			{
+				Problems[server.Id] = problem;
+			}
+		}
 		Provider = provider is null ? null : ProviderCatalog.Find(provider);
 		if (Provider is not null)
 		{

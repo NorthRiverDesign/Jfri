@@ -24,6 +24,11 @@ production-grade answers are well established too. Jfri connects the two.
    it, build the image on it, run migrations, roll out, and check it answers over HTTPS.
 5. **Keep deploying**: a generated GitHub Actions workflow runs your tests, then triggers Jfri
    through an HMAC-signed webhook. A plain GitHub push webhook works too.
+6. **Roll back or take down**: put an earlier build back in seconds (the server keeps the last
+   three, and each comes back with the settings it was released with; database migrations aren't
+   undone). Taking an app down deletes its containers, database and volumes from the server,
+   keeps the nightly backups in `/var/lib/jfri/backups/<app>`, and asks you to type the app's
+   name first.
 
 ### Stacks
 
@@ -49,12 +54,14 @@ Databases: PostgreSQL, MySQL, MariaDB, MongoDB, SQL Server, SQLite. Caches: Redi
   server can see it in the process list.
 - **Release step**: migrations run once per deploy before new code takes traffic.
 - **HTTPS** from the first deploy (Let's Encrypt via Traefik or Caddy). The address is
-  `<ip>.sslip.io` until you point a domain at the server.
+  `<app>.<ip>.sslip.io` until you point a domain at the server.
 - **Servers are hardened**: a firewall allowing only 22/80/443, unattended security upgrades,
   fail2ban, swap on small machines and rotated container logs.
 - **Kubernetes** (single-node k3s, the default): rolling updates, probes, resource limits,
   a disruption budget, Pod Security admission, default-deny network policies.
-  **Docker Compose** is the lighter alternative for small servers.
+  Several apps can share a server.
+  **Docker Compose** is the lighter alternative for small servers, one app per server (its Caddy
+  owns ports 80 and 443).
 
 ## Run it
 
@@ -144,6 +151,8 @@ Jfri is an experiment.
     DigitalOcean's Ubuntu image slug, haven't been checked against a real account.
   - **Real deployments:** no deploy has run against a real server yet. The first deploys are
     beta, so watch the log.
+  - **Rollback and take-down scripts:** checked with `bash -n` and against fake `k3s`/`docker`
+    commands only.
 
 Ideas for later:
 

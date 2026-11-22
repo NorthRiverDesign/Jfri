@@ -168,7 +168,7 @@ else
 			{
 				<li>
 					<a class="row" href="/deployments/@d.Id">
-						<span>#@d.Id <small class="muted">@d.CreatedAt.ToString("u") · @d.Trigger @(d.Commit is null ? "" : $"· {d.Commit[..Math.Min(8, d.Commit.Length)]}")</small></span>
+						<span>#@d.Id@(d.Kind == DeploymentKind.Deploy ? "" : d.Kind == DeploymentKind.Rollback ? " rollback" : " take-down") <small class="muted">@d.CreatedAt.ToString("u") · @d.Trigger @(d.Commit is null ? "" : $"· {d.Commit[..Math.Min(8, d.Commit.Length)]}")</small></span>
 						<span class="badge @d.Status">@d.Status</span>
 					</a>
 				</li>
@@ -194,9 +194,24 @@ else
 }
 
 <section class="danger-zone">
-	<form method="post" asp-page-handler="Delete" class="confirm">
-		<button type="submit" class="danger">Remove app from Jfri</button>
-		<span class="small muted">Doesn't touch running servers.</span>
+	@if (Model.Server is { } server)
+	{
+		<form method="post" asp-page-handler="TakeDown" class="card">
+			<h2>Take it down</h2>
+			<p class="small">Deletes @Model.App.Name from @server.Name: its containers, database and volumes. Nightly backups stay on the server in <code>/var/lib/jfri/backups/@Model.App.Name</code>, and the server keeps running.</p>
+			<div class="confirm">
+				<label>Type <code>@Model.App.Name</code> to confirm <input name="ConfirmName" autocomplete="off" required /></label>
+				<button type="submit" class="danger">Take down from @server.Name</button>
+			</div>
+		</form>
+	}
+	<form method="post" asp-page-handler="Delete" class="card">
+		<h2>Remove from Jfri</h2>
+		<p class="small">@(Model.Server is null ? "Deletes the app's settings, secrets and deployment history from Jfri." : $"Jfri forgets the app and its generated secrets, but it keeps running on {Model.Server.Name}. Take it down first to stop it.")</p>
+		<div class="confirm">
+			<label>Type <code>@Model.App.Name</code> to confirm <input name="ConfirmName" autocomplete="off" required /></label>
+			<button type="submit" class="danger">Remove app from Jfri</button>
+		</div>
 	</form>
 </section>
 

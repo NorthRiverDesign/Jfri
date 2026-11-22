@@ -35,6 +35,9 @@ public sealed class ScriptTests
 			ServerScripts.Bootstrap(runtime, "ops@example.com", 2222),
 			ServerScripts.BuildAndDeploy(plan, "abc123-rev", ".jfri/Dockerfile"),
 			ServerScripts.Verify(plan, "shop.example.com"),
+			ServerScripts.CheckImage(plan, "abc123-rev"),
+			ServerScripts.Release(plan, "abc123-rev"),
+			ServerScripts.Teardown(plan.AppName),
 		};
 		scripts.AddRange(ArtifactBuilder.Build(plan, context).Where(a => a.Path.EndsWith(".sh", StringComparison.Ordinal)).Select(a => a.Content));
 		foreach (var script in scripts)
@@ -139,5 +142,120 @@ public sealed class ScriptTests
 
 		await Assert.ThrowsAsync<DeploymentFailedException>(() => new DeploymentEngine().DeployAsync(request, host, _ => { }, CancellationToken.None));
 		Assert.Empty(host.Scripts);
+	}
+
+	/// <summary>
+	/// Runs a server script with fake commands first on PATH (sudo just runs its arguments). Each fake
+	/// records how it was called. Returns the result and the calls, in order.
+	/// </summary>
+	static async Task<(ProcessResult Result, string Calls)> RunWithFakes(string script, params (string Name, string Body)[] fakes)
+	{
+		var dir = Directory.CreateTempSubdirectory("jfri-fakes-").FullName;
+		try
+		{
+			var calls = Path.Combine(dir, "calls.log");
+			foreach (var (name, body) in fakes.Append(("sudo", "exec \"$@\"")))
+			{
+				var path = Path.Combine(dir, name);
+				File.WriteAllText(path, $"#!/usr/bin/env bash\necho \"{name} $*\" >> '{calls}'\n{body}\n");
+				if (!OperatingSystem.IsWindows())
+				{
+					File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+				}
+			}
+			var result = await Bash(SshRemoteHost.WrapScript($"export PATH='{dir}':\"$PATH\"\n{script}"), "-s");
+			return (result, File.Exists(calls) ? File.ReadAllText(calls) : "");
+		}
+		finally
+		{
+			Directory.Delete(dir, recursive: true);
+		}
+	}
+
+	[Fact]
+	public async Task A_rollback_loads_a_build_docker_still_has_into_k3s()
+	{
+		var plan = Fixtures.Plan("static-site");
+		var (result, calls) = await RunWithFakes(ServerScripts.CheckImage(plan, "old-rev"),
+			("k3s", "if [ \"$5\" = ls ]; then for i in $(seq 1 2000); do echo docker.io/library/postgres:$i; done; fi; if [ \"$5\" = import ]; then cat >/dev/null; fi"),
+			("docker", "if [ \"$1\" = save ]; then echo tarball; fi; exit 0"));
+
+		Assert.True(result.ExitCode == 0, result.Output);
+		Assert.Contains("docker save jfri/static-site:old-rev", calls);
+		Assert.Contains("k3s ctr -n k8s.io images import -", calls);
+	}
+
+	[Fact]
+	public async Task A_rollback_finds_a_build_k3s_already_has()
+	{
+		var plan = Fixtures.Plan("static-site");
+		var (result, calls) = await RunWithFakes(ServerScripts.CheckImage(plan, "old-rev"),
+			// The match comes first and lots of output follows: grep must not stop early and trip pipefail.
+			("k3s", "echo docker.io/jfri/static-site:old-rev; for i in $(seq 1 20000); do echo docker.io/library/postgres:$i; done"),
+			("docker", "exit 1"));
+
+		Assert.True(result.ExitCode == 0, result.Output);
+		Assert.DoesNotContain("docker", calls.Replace("docker.io", "", StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData(RuntimeKind.Kubernetes)]
+	[InlineData(RuntimeKind.Compose)]
+	public async Task A_rollback_stops_when_the_build_is_gone(RuntimeKind runtime)
+	{
+		var plan = Fixtures.Plan("static-site", runtime);
+		var (result, _) = await RunWithFakes(ServerScripts.CheckImage(plan, "old-rev"), ("k3s", "exit 0"), ("docker", "exit 1"));
+
+		Assert.Equal(1, result.ExitCode);
+		Assert.Contains("no longer on the server", result.Output);
+	}
+
+	[Fact]
+	public async Task Teardown_leaves_namespaces_jfri_did_not_create_alone()
+	{
+		var (result, calls) = await RunWithFakes(ServerScripts.Teardown("shop"),
+			("k3s", "exit 0"),
+			("docker", "exit 0"));
+
+		Assert.Equal(1, result.ExitCode);
+		Assert.Contains("wasn't created by Jfri", result.Output);
+		Assert.DoesNotContain("delete", calls);
+		Assert.DoesNotContain("docker", calls);
+	}
+
+	[Fact]
+	public async Task Teardown_deletes_nothing_when_it_cannot_save_the_backups()
+	{
+		var (result, calls) = await RunWithFakes(ServerScripts.Teardown("shop"),
+			("k3s", """
+				case "$*" in
+				  *managed-by*) echo jfri ;;
+				  *"get pvc backups"*) echo pvc-1234 ;;
+				  *"get pv pvc-1234"*) echo /nonexistent/jfri-test/pvc-1234 ;;
+				esac
+				"""),
+			("docker", "exit 0"));
+
+		Assert.Equal(1, result.ExitCode);
+		Assert.Contains("nothing was deleted", result.Output);
+		Assert.DoesNotContain("delete", calls);
+		Assert.DoesNotContain("docker", calls);
+	}
+
+	[Fact]
+	public async Task Teardown_deletes_nothing_when_it_cannot_look_up_the_backups()
+	{
+		var (result, calls) = await RunWithFakes(ServerScripts.Teardown("shop"),
+			("k3s", """
+				case "$*" in
+				  *managed-by*) echo jfri ;;
+				  *"get pvc backups"*) echo 'Unable to connect to the server' >&2; exit 1 ;;
+				esac
+				"""),
+			("docker", "exit 0"));
+
+		Assert.NotEqual(0, result.ExitCode);
+		Assert.DoesNotContain("delete", calls);
+		Assert.DoesNotContain("docker", calls);
 	}
 }

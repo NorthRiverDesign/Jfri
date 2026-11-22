@@ -40,10 +40,19 @@
 					<select name="ServerId">
 						@foreach (var s in Model.Servers)
 						{
-							<option value="@s.Id">@s.Name (@s.Host@(s.Runtime is null ? "" : $", runs {s.Runtime}"))</option>
+							<option value="@s.Id" disabled="@Model.Problems.ContainsKey(s.Id)">@s.Name (@s.Host@(s.Runtime is null ? "" : $", runs {s.Runtime}"))@(Model.Problems.ContainsKey(s.Id) ? " · not available" : "")</option>
 						}
 					</select>
 				</label>
+				@if (Model.Problems.Count > 0)
+				{
+					<ul class="small muted">
+						@foreach (var s in Model.Servers.Where(s => Model.Problems.ContainsKey(s.Id)))
+						{
+							<li>@Model.Problems[s.Id]</li>
+						}
+					</ul>
+				}
 				<p class="small muted">The server needs Ubuntu or Debian. Jfri turns on a firewall that allows only SSH (on the server's configured port), HTTP and HTTPS, plus automatic security updates and fail2ban.</p>
 				<button type="submit" class="primary">Deploy now</button>
 			</form>

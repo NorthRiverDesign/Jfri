@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Jfri.Web.Pages.Apps;
 
-public sealed class DetailsModel(JfriDb db, AppService apps) : PageModel
+public sealed class DetailsModel(JfriDb db, AppService apps, DeploymentScheduler scheduler) : PageModel
 {
 	public App App { get; private set; } = null!;
 	public RepositoryProfile Profile { get; private set; } = new();
@@ -18,6 +18,8 @@ public sealed class DetailsModel(JfriDb db, AppService apps) : PageModel
 	public DeploymentPlan? Plan { get; private set; }
 	public List<CostQuote> Quotes { get; private set; } = [];
 	public List<Deployment> Deployments { get; private set; } = [];
+	/// <summary>The server the app runs on, if it's deployed.</summary>
+	public Server? Server { get; private set; }
 	public string WebhookUrl { get; private set; } = "";
 	public string WebhookSecret { get; private set; } = "";
 	public string? Error { get; private set; }
@@ -75,14 +77,51 @@ public sealed class DetailsModel(JfriDb db, AppService apps) : PageModel
 		return Redirect($"/apps/{id}");
 	}
 
-	public async Task<IActionResult> OnPostDeleteAsync(int id, CancellationToken ct)
+	/// <summary>Queues deleting the app from its server. Needs the app's name typed in, since it deletes the database.</summary>
+	public async Task<IActionResult> OnPostTakeDownAsync(int id, string? confirmName, CancellationToken ct)
+	{
+		var app = await db.Apps.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, ct);
+		if (app is null)
+		{
+			return NotFound();
+		}
+		if (app.ServerId is null)
+		{
+			TempData["Message"] = $"{app.Name} isn't deployed anywhere.";
+			return Redirect($"/apps/{id}");
+		}
+		if (!string.Equals(confirmName?.Trim(), app.Name, StringComparison.Ordinal))
+		{
+			Error = $"Type {app.Name} to confirm taking it down.";
+			await LoadAsync(id, ct);
+			return Page();
+		}
+		var teardown = await scheduler.QueueTeardownAsync(app, ct);
+		return Redirect($"/deployments/{teardown.Id}");
+	}
+
+	public async Task<IActionResult> OnPostDeleteAsync(int id, string? confirmName, CancellationToken ct)
 	{
 		var app = await db.Apps.FirstOrDefaultAsync(a => a.Id == id, ct);
-		if (app is not null)
+		if (app is null)
 		{
-			await apps.DeleteAsync(app, ct);
-			TempData["Message"] = $"Removed {app.Name}.";
+			return Redirect("/");
 		}
+		if (!string.Equals(confirmName?.Trim(), app.Name, StringComparison.Ordinal))
+		{
+			Error = $"Type {app.Name} to confirm removing it.";
+		}
+		else if (await scheduler.BusyAsync(app.Id, ct))
+		{
+			Error = "A deployment for this app is queued or running. Wait for it to finish, then remove the app.";
+		}
+		if (Error is not null)
+		{
+			await LoadAsync(id, ct);
+			return Page();
+		}
+		await apps.DeleteAsync(app, ct);
+		TempData["Message"] = app.ServerId is null ? $"Removed {app.Name}." : $"Removed {app.Name} from Jfri. It keeps running on its server.";
 		return Redirect("/");
 	}
 
@@ -121,6 +160,7 @@ public sealed class DetailsModel(JfriDb db, AppService apps) : PageModel
 		{
 			Quotes = await apps.EstimateAsync(Plan, ct);
 		}
+		Server = app.ServerId is null ? null : await db.Servers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == app.ServerId, ct);
 		Deployments = await db.Deployments.AsNoTracking().Where(d => d.AppId == id).OrderByDescending(d => d.Id).Take(10).ToListAsync(ct);
 		WebhookUrl = $"{Request.Scheme}://{Request.Host}/hooks/apps/{id}/deploy";
 		WebhookSecret = apps.WebhookSecret(app);
