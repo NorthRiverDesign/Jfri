@@ -241,10 +241,29 @@ public static class ComposeGenerator
 	/// <summary>Compose interpolates $VAR in the file itself; $$ passes a literal $ through to the container's shell.</summary>
 	static string Escape(string value) => value.Replace("$", "$$", StringComparison.Ordinal);
 
-	/// <summary>Compose env files take values literally to end of line; reject newlines so a value can't inject another variable.</summary>
-	static string EnvValue(string value) => value.Contains('\n') || value.Contains('\r')
-		? throw new InvalidOperationException("Environment values can't contain newlines.")
-		: value;
+	/// <summary>
+	/// Writes a value so Compose reads it back exactly. Unquoted env-file values get $VAR interpolated,
+	/// " #" comments cut off and surrounding spaces trimmed; single-quoted values are literal (except \'), and
+	/// double-quoted ones take \\, \" and $$ escapes. Newlines are refused so a value can't inject
+	/// another variable.
+	/// </summary>
+	public static string EnvValue(string value)
+	{
+		if (value.Contains('\n') || value.Contains('\r'))
+		{
+			throw new InvalidOperationException("Environment values can't contain newlines.");
+		}
+		if (value.Length > 0 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or ':' or '/' or '@' or '+' or '=' or ',' or '%' or '~' or '?' or '&'))
+		{
+			return value;
+		}
+		// Inside single quotes \' still ends up escaping the quote, so values with a backslash take the double-quoted form.
+		if (!value.Contains('\'') && !value.Contains('\\'))
+		{
+			return $"'{value}'";
+		}
+		return "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("$", "$$", StringComparison.Ordinal) + "\"";
+	}
 
 	public static string Caddyfile(DeploymentPlan plan, RenderContext context)
 	{

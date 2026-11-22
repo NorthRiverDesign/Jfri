@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Jfri.Web.Pages.Apps;
 
-public sealed class DetailsModel(JfriDb db, AppService apps, DeploymentScheduler scheduler) : PageModel
+public sealed class DetailsModel(JfriDb db, AppService apps, Vault vault, DeploymentScheduler scheduler) : PageModel
 {
 	public App App { get; private set; } = null!;
 	public RepositoryProfile Profile { get; private set; } = new();
@@ -20,6 +20,8 @@ public sealed class DetailsModel(JfriDb db, AppService apps, DeploymentScheduler
 	public List<Deployment> Deployments { get; private set; } = [];
 	/// <summary>The server the app runs on, if it's deployed.</summary>
 	public Server? Server { get; private set; }
+	/// <summary>Names of the user's secret settings (values are never shown).</summary>
+	public List<string> SecretNames { get; private set; } = [];
 	public string WebhookUrl { get; private set; } = "";
 	public string WebhookSecret { get; private set; } = "";
 	public string? Error { get; private set; }
@@ -77,6 +79,61 @@ public sealed class DetailsModel(JfriDb db, AppService apps, DeploymentScheduler
 		return Redirect($"/apps/{id}");
 	}
 
+	/// <summary>Saves a secret setting. The value is encrypted and never rendered back; it applies on the next deploy.</summary>
+	public async Task<IActionResult> OnPostSetSecretAsync(int id, string? name, string? value, CancellationToken ct)
+	{
+		var app = await db.Apps.FirstOrDefaultAsync(a => a.Id == id, ct);
+		if (app is null)
+		{
+			return NotFound();
+		}
+		name = name?.Trim() ?? "";
+		value = value?.Trim() ?? "";
+		Error = Planner.ManagedSecrets.Contains(name) ? $"Jfri generates {name} and the database or cache is set up with it, so it can't be replaced."
+			: !Planner.IsSecretSettingName(name) ? "Secret names use capital letters, digits and underscores, like STRIPE_SECRET."
+			: value.Length == 0 ? "Enter a value."
+			: value.Contains('\n') || value.Contains('\r') ? "Values must be a single line. Base64-encode multi-line keys."
+			: value.Length > 32 * 1024 ? "That value is too long (32 KB at most)."
+			: null;
+		if (Error is not null)
+		{
+			await LoadAsync(id, ct);
+			return Page();
+		}
+		var values = vault.UnprotectMap(app.EncryptedUserSecrets);
+		values[name] = value;
+		app.EncryptedUserSecrets = vault.ProtectMap(values);
+		var options = AppService.Options(app);
+		if (!options.SecretSettings.Contains(name))
+		{
+			options.SecretSettings.Add(name);
+		}
+		options.ExtraEnvironment.Remove(name);
+		app.OptionsJson = JsonSerializer.Serialize(options, AppService.Json);
+		await db.SaveChangesAsync(ct);
+		TempData["Message"] = $"Saved {name}. It applies on the next deploy.";
+		return Redirect($"/apps/{id}#secrets");
+	}
+
+	public async Task<IActionResult> OnPostRemoveSecretAsync(int id, string? name, CancellationToken ct)
+	{
+		var app = await db.Apps.FirstOrDefaultAsync(a => a.Id == id, ct);
+		if (app is null)
+		{
+			return NotFound();
+		}
+		var values = vault.UnprotectMap(app.EncryptedUserSecrets);
+		var options = AppService.Options(app);
+		if (name is not null && (values.Remove(name) | options.SecretSettings.Remove(name)))
+		{
+			app.EncryptedUserSecrets = values.Count == 0 ? null : vault.ProtectMap(values);
+			app.OptionsJson = JsonSerializer.Serialize(options, AppService.Json);
+			await db.SaveChangesAsync(ct);
+			TempData["Message"] = $"Removed {name}. It's gone from the server after the next deploy.";
+		}
+		return Redirect($"/apps/{id}#secrets");
+	}
+
 	/// <summary>Queues deleting the app from its server. Needs the app's name typed in, since it deletes the database.</summary>
 	public async Task<IActionResult> OnPostTakeDownAsync(int id, string? confirmName, CancellationToken ct)
 	{
@@ -111,6 +168,11 @@ public sealed class DetailsModel(JfriDb db, AppService apps, DeploymentScheduler
 		{
 			Error = $"Type {app.Name} to confirm removing it.";
 		}
+		else if (app.ServerId is not null)
+		{
+			// Jfri would lose track of what runs on the server: a leftover Compose proxy would still hold ports 80 and 443.
+			Error = $"{app.Name} still runs on its server. Take it down first, or remove the server on the Connections page if it's gone.";
+		}
 		else if (await scheduler.BusyAsync(app.Id, ct))
 		{
 			Error = "A deployment for this app is queued or running. Wait for it to finish, then remove the app.";
@@ -121,7 +183,7 @@ public sealed class DetailsModel(JfriDb db, AppService apps, DeploymentScheduler
 			return Page();
 		}
 		await apps.DeleteAsync(app, ct);
-		TempData["Message"] = app.ServerId is null ? $"Removed {app.Name}." : $"Removed {app.Name} from Jfri. It keeps running on its server.";
+		TempData["Message"] = $"Removed {app.Name}.";
 		return Redirect("/");
 	}
 
@@ -155,6 +217,7 @@ public sealed class DetailsModel(JfriDb db, AppService apps, DeploymentScheduler
 		App = app;
 		Profile = AppService.Profile(app);
 		Options = AppService.Options(app);
+		SecretNames = Options.SecretSettings.Order(StringComparer.Ordinal).ToList();
 		Plan = AppService.Plan(app);
 		if (Plan is not null)
 		{

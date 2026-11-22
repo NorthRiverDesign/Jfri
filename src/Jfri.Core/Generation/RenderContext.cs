@@ -65,6 +65,31 @@ public static class SecretGenerator
 		return result;
 	}
 
+	/// <summary>
+	/// The secret values a deploy renders with: generated values (missing ones filled in) with the
+	/// user's settings on top. Returns the generated map separately so the caller can store it without
+	/// the user's values mixed in. Throws when a planned setting has no value.
+	/// </summary>
+	public static (Dictionary<string, string> Generated, Dictionary<string, string> All) ForDeploy(
+		IReadOnlyCollection<PlannedSecret> secrets, IReadOnlyDictionary<string, string>? generated, IReadOnlyDictionary<string, string>? user)
+	{
+		var filled = Fill(secrets, generated);
+		var all = new Dictionary<string, string>(filled, StringComparer.Ordinal);
+		foreach (var (name, value) in user ?? new Dictionary<string, string>())
+		{
+			if (!Planner.ManagedSecrets.Contains(name))
+			{
+				all[name] = value;
+			}
+		}
+		var missing = secrets.Where(s => !all.ContainsKey(s.Name)).Select(s => s.Name).ToList();
+		if (missing.Count > 0)
+		{
+			throw new InvalidOperationException($"Set a value for {string.Join(", ", missing)} on the app's page.");
+		}
+		return (filled, all);
+	}
+
 	public static string Generate(SecretKind kind) => kind switch
 	{
 		SecretKind.LaravelKey => "base64:" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),

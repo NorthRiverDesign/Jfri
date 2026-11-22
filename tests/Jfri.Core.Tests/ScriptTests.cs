@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Jfri.Core.Execution;
 using Jfri.Core.Generation;
@@ -258,4 +259,85 @@ public sealed class ScriptTests
 		Assert.DoesNotContain("delete", calls);
 		Assert.DoesNotContain("docker", calls);
 	}
+
+	/// <summary>Values Compose would mangle if they went into an env file unquoted.</summary>
+	static readonly Dictionary<string, string> AwkwardValues = new(StringComparer.Ordinal)
+	{
+		["WITH_DOLLARS"] = "pa$word${HOME}$$",
+		["WITH_HASH"] = "abc #not a comment",
+		["WITH_SPACES"] = "  padded  ",
+		["WITH_QUOTES"] = "it's \"quoted\" $5 back\\slash \\n",
+		["URL_LIKE"] = "postgresql://u:p@db:5432/app?sslmode=disable&x=1",
+		["EMPTY"] = "",
+		["TRAILING_BACKSLASH"] = "abc\\",
+		["QUOTE_AND_TRAILING_BACKSLASH"] = "it's\\",
+	};
+
+	static async Task<bool> HasDockerCompose()
+	{
+		try
+		{
+			return (await ProcessRunner.RunAsync("docker", ["compose", "version"], CancellationToken.None, timeout: TimeSpan.FromSeconds(20))).ExitCode == 0;
+		}
+		catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+		{
+			return false;
+		}
+	}
+
+	public static TheoryData<string> ComposeFixtures() => new(["laravel-mysql", "laravel-sqlite", "aspnet-postgres", "next-prisma", "django-celery", "static-site", "dockerfile-only"]);
+
+	[Theory]
+	[MemberData(nameof(ComposeFixtures))]
+	public async Task Compose_projects_pass_docker_compose_config_and_keep_values_exact(string fixture)
+	{
+		if (!await HasDockerCompose())
+		{
+			return; // Not installed here; CI runners have it.
+		}
+		const string secretValue = "sk_live_$ecret'#1 \"x\" ${HOME}";
+		var options = new PlanOptions { Runtime = RuntimeKind.Compose, ExtraEnvironment = new(AwkwardValues), SecretSettings = ["STRIPE_SECRET"] };
+		var plan = Planner.Plan(Fixtures.Analyze(fixture), options, fixture);
+		var (_, secrets) = SecretGenerator.ForDeploy(plan.Secrets, null, new Dictionary<string, string> { ["STRIPE_SECRET"] = secretValue });
+		var dir = Directory.CreateTempSubdirectory("jfri-compose-");
+		try
+		{
+			foreach (var artifact in ComposeGenerator.Generate(plan, new RenderContext("shop.example.com", "rev1", secrets)))
+			{
+				var path = Path.Combine(dir.FullName, artifact.Path);
+				Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+				File.WriteAllText(path, artifact.Content);
+			}
+			var project = Path.Combine(dir.FullName, "compose");
+			var result = await ProcessRunner.RunAsync("docker", ["compose", "config", "--format", "json", "--output", "resolved.json"], CancellationToken.None, timeout: TimeSpan.FromSeconds(60), workingDirectory: project);
+
+			Assert.True(result.ExitCode == 0, result.Output);
+			Assert.DoesNotContain("variable is not set", result.Output);
+			var services = JsonNode.Parse(File.ReadAllText(Path.Combine(project, "resolved.json")))!["services"]!.AsObject();
+			// The resolved output escapes every literal $ as $$.
+			var env = services["web"]!["environment"]!.AsObject().ToDictionary(e => e.Key, e => e.Value?.GetValue<string>().Replace("$$", "$", StringComparison.Ordinal) ?? "");
+			foreach (var (key, value) in AwkwardValues)
+			{
+				Assert.Equal(value, env[key]);
+			}
+			Assert.Equal(secretValue, env["STRIPE_SECRET"]);
+			if (plan.Database is { } db)
+			{
+				Assert.Contains(secrets["DB_PASSWORD"], services[db.Name]!["environment"]!.AsObject().Select(e => e.Value?.GetValue<string>()));
+			}
+		}
+		finally
+		{
+			dir.Delete(recursive: true);
+		}
+	}
+
+	[Theory]
+	[InlineData("plain-value_1.2:3/4@5", "plain-value_1.2:3/4@5")]
+	[InlineData("has space", "'has space'")]
+	[InlineData("", "''")]
+	[InlineData("it's $x", "\"it's $$x\"")]
+	[InlineData("abc\\", "\"abc\\\\\"")]
+	public void Env_file_values_are_quoted_only_when_needed(string value, string expected) =>
+		Assert.Equal(expected, ComposeGenerator.EnvValue(value));
 }

@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Jfri.Web.Data.Migrations
 {
     [DbContext(typeof(JfriDb))]
-    [Migration("20261122231423_DeploymentKindAndPlan")]
-    partial class DeploymentKindAndPlan
+    [Migration("20261122234238_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -67,6 +67,9 @@ namespace Jfri.Web.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("EncryptedSecrets")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EncryptedUserSecrets")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("EncryptedWebhookSecret")

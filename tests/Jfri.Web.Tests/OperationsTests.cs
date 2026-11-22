@@ -134,7 +134,12 @@ public sealed class OperationsTests
 
 		var page = await client.GetStringAsync($"/apps/{appId}");
 		Assert.Contains("Take down from box", page);
+		Assert.DoesNotContain("Remove app from Jfri", page);
 		var form = await JfriFactory.FormAsync(client, $"/apps/{appId}");
+		// Removing a deployed app would leave it running where Jfri can't see it.
+		var remove = await client.PostAsync($"/apps/{appId}?handler=Delete", JfriFactory.Form(form, ("ConfirmName", "shop")));
+		Assert.Equal(HttpStatusCode.OK, remove.StatusCode);
+		Assert.Contains("Take it down first", await remove.Content.ReadAsStringAsync());
 		var wrong = await client.PostAsync($"/apps/{appId}?handler=TakeDown", JfriFactory.Form(form, ("ConfirmName", "")));
 		Assert.Equal(HttpStatusCode.OK, wrong.StatusCode);
 
@@ -190,5 +195,63 @@ public sealed class OperationsTests
 		db.Deployments.Add(new Deployment { AppId = app.Id, ServerId = server.Id, Kind = DeploymentKind.Teardown, Status = DeploymentStatus.Succeeded });
 		await db.SaveChangesAsync();
 		Assert.False(await scheduler.CanRollBackToAsync(app, earlier, ct));
+	}
+
+	[Fact]
+	public async Task Secret_settings_are_encrypted_never_shown_and_reach_the_plan()
+	{
+		using var factory = new JfriFactory();
+		var client = await factory.SignedInAsync();
+		int appId;
+		using (var scope = factory.Services.CreateScope())
+		{
+			var db = scope.ServiceProvider.GetRequiredService<JfriDb>();
+			var app = NewApp("shop", null, vault: scope.ServiceProvider.GetRequiredService<Vault>());
+			app.ProfileJson = """{"app":{"stack":"Static","framework":"Static site","port":8080},"environment":[{"key":"STRIPE_SECRET"},{"key":"MAILGUN_KEY"}]}""";
+			app.OptionsJson = """{"extraEnvironment":{"STRIPE_SECRET":"was-plain"}}""";
+			db.Apps.Add(app);
+			await db.SaveChangesAsync();
+			appId = app.Id;
+		}
+		const string value = "sk_live_51HxTopSecretValue";
+		var form = await JfriFactory.FormAsync(client, $"/apps/{appId}");
+		// Settings the app reads but nobody set are offered as names.
+		Assert.Contains("<option value=\"MAILGUN_KEY\">", await client.GetStringAsync($"/apps/{appId}"));
+
+		foreach (var (name, expected) in new[] { ("DB_PASSWORD", "can&#x27;t be replaced"), ("stripe_secret", "capital letters"), ("STRIPE_SECRET", "Enter a value") })
+		{
+			var refused = await client.PostAsync($"/apps/{appId}?handler=SetSecret", JfriFactory.Form(form, ("Name", name), ("Value", name == "STRIPE_SECRET" ? "  " : value)));
+			Assert.Equal(HttpStatusCode.OK, refused.StatusCode);
+			Assert.Contains(expected, await refused.Content.ReadAsStringAsync());
+		}
+
+		var saved = await client.PostAsync($"/apps/{appId}?handler=SetSecret", JfriFactory.Form(form, ("Name", "STRIPE_SECRET"), ("Value", $" {value} ")));
+		Assert.Equal(HttpStatusCode.Redirect, saved.StatusCode);
+		var page = await client.GetStringAsync($"/apps/{appId}");
+		Assert.Contains("<code>STRIPE_SECRET</code>", page);
+		Assert.DoesNotContain(value, page);
+		Assert.DoesNotContain(value, await client.GetStringAsync($"/apps/{appId}/files"));
+		using (var scope = factory.Services.CreateScope())
+		{
+			var db = scope.ServiceProvider.GetRequiredService<JfriDb>();
+			var vault = scope.ServiceProvider.GetRequiredService<Vault>();
+			var app = await db.Apps.SingleAsync(a => a.Id == appId);
+			Assert.DoesNotContain(value, app.EncryptedUserSecrets);
+			Assert.DoesNotContain(value, app.OptionsJson);
+			Assert.Equal(value, vault.UnprotectMap(app.EncryptedUserSecrets)["STRIPE_SECRET"]);
+			var options = AppService.Options(app);
+			Assert.Equal(["STRIPE_SECRET"], options.SecretSettings);
+			Assert.False(options.ExtraEnvironment.ContainsKey("STRIPE_SECRET"));
+			Assert.Equal("{{secret:STRIPE_SECRET}}", AppService.Plan(app)!.Environment.Single(e => e.Key == "STRIPE_SECRET").Value);
+		}
+
+		var removed = await client.PostAsync($"/apps/{appId}?handler=RemoveSecret", JfriFactory.Form(form, ("Name", "STRIPE_SECRET")));
+		Assert.Equal(HttpStatusCode.Redirect, removed.StatusCode);
+		using (var scope = factory.Services.CreateScope())
+		{
+			var app = await scope.ServiceProvider.GetRequiredService<JfriDb>().Apps.SingleAsync(a => a.Id == appId);
+			Assert.Null(app.EncryptedUserSecrets);
+			Assert.Empty(AppService.Options(app).SecretSettings);
+		}
 	}
 }

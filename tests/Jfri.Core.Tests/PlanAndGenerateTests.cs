@@ -275,4 +275,44 @@ public sealed class GeneratorTests
 			Assert.Equal(expected.Select(a => (a.Path, a.Content, a.Mode)), actual.Select(a => (a.Path, a.Content, a.Mode)));
 		}
 	}
+
+	[Fact]
+	public void Secret_settings_become_secret_environment_and_never_reach_the_config_map()
+	{
+		var options = new PlanOptions { SecretSettings = ["STRIPE_SECRET", "APP_KEY", "DB_PASSWORD", "lower_case", "MAIL_PASSWORD", "STRIPE_SECRET"], ExtraEnvironment = new() { ["MAIL_PASSWORD"] = "plain" } };
+		var plan = Planner.Plan(Fixtures.Analyze("laravel-mysql"), options, "shop");
+
+		Assert.Equal("{{secret:STRIPE_SECRET}}", plan.Environment.Single(e => e.Key == "STRIPE_SECRET").Value);
+		// A secret setting wins over a plain value with the same name.
+		Assert.Equal("{{secret:MAIL_PASSWORD}}", plan.Environment.Single(e => e.Key == "MAIL_PASSWORD").Value);
+		Assert.Equal(SecretKind.UserProvided, plan.Secrets.Single(s => s.Name == "STRIPE_SECRET").Kind);
+		// Overriding a generated secret keeps it generated, so removing the override falls back to it.
+		Assert.Equal(SecretKind.LaravelKey, plan.Secrets.Single(s => s.Name == "APP_KEY").Kind);
+		// The database password and invalid names are ignored.
+		Assert.Equal(SecretKind.Password, plan.Secrets.Single(s => s.Name == "DB_PASSWORD").Kind);
+		Assert.DoesNotContain(plan.Environment, e => e.Key == "lower_case");
+		Assert.DoesNotContain("STRIPE_SECRET", plan.UnsetEnvironment);
+
+		var secrets = SecretGenerator.ForDeploy(plan.Secrets, null, new Dictionary<string, string> { ["STRIPE_SECRET"] = "sk_live_abc", ["MAIL_PASSWORD"] = "hunter22", ["APP_KEY"] = "base64:mine" }).All;
+		var files = KubernetesGenerator.Generate(plan, new RenderContext("shop.example.com", "rev1", secrets));
+		Assert.Contains("STRIPE_SECRET: \"sk_live_abc\"", files.Single(f => f.Path == "k8s/10-secrets.yaml").Content);
+		Assert.Contains("APP_KEY: \"base64:mine\"", files.Single(f => f.Path == "k8s/10-secrets.yaml").Content);
+		Assert.All(files.Where(f => !f.Sensitive), f => Assert.DoesNotContain("sk_live_abc", f.Content));
+	}
+
+	[Fact]
+	public void Deploy_secrets_layer_the_users_settings_over_generated_ones()
+	{
+		PlannedSecret[] planned = [new("DB_PASSWORD", SecretKind.Password, "db"), new("APP_KEY", SecretKind.LaravelKey, "key"), new("STRIPE_SECRET", SecretKind.UserProvided, "set by you")];
+		var stored = new Dictionary<string, string> { ["DB_PASSWORD"] = "stored-db-password", ["APP_KEY"] = "base64:generated" };
+
+		var (generated, all) = SecretGenerator.ForDeploy(planned, stored, new Dictionary<string, string> { ["APP_KEY"] = "base64:mine", ["STRIPE_SECRET"] = "sk", ["DB_PASSWORD"] = "sneaky" });
+
+		Assert.Equal(stored, generated);
+		Assert.Equal("base64:mine", all["APP_KEY"]);
+		Assert.Equal("sk", all["STRIPE_SECRET"]);
+		Assert.Equal("stored-db-password", all["DB_PASSWORD"]);
+		var missing = Assert.Throws<InvalidOperationException>(() => SecretGenerator.ForDeploy(planned, stored, null));
+		Assert.Contains("STRIPE_SECRET", missing.Message);
+	}
 }

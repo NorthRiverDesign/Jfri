@@ -125,6 +125,7 @@ ul.decisions li { margin: .35rem 0; }
 
 .log { min-height: 12rem; max-height: none; white-space: pre-wrap; word-break: break-word; font-size: .8rem; line-height: 1.45; }
 .danger-zone { margin: 2rem 0; }
+form.card > h2, form.card > p { margin: 0; }
 
 @media (max-width: 560px) {
 	main { padding: .75rem; }

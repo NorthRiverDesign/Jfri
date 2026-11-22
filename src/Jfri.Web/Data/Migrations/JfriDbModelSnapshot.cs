@@ -66,6 +66,9 @@ namespace Jfri.Web.Data.Migrations
                     b.Property<string>("EncryptedSecrets")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("EncryptedUserSecrets")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("EncryptedWebhookSecret")
                         .IsRequired()
                         .HasColumnType("TEXT");

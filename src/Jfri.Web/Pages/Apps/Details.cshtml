@@ -99,7 +99,7 @@ else
 		{
 			<details>
 				<summary>@plan.UnsetEnvironment.Count other settings your app reads</summary>
-				<p class="small muted">Jfri leaves these to your app's defaults. Set any you need below.</p>
+				<p class="small muted">Jfri leaves these to your app's defaults. Set any you need: plain values under "Adjust the plan", keys and passwords under "Secret settings".</p>
 				<p class="small"><code>@string.Join(", ", plan.UnsetEnvironment)</code></p>
 			</details>
 		}
@@ -120,6 +120,37 @@ else
 			</form>
 		</details>
 		<p><a href="/apps/@Model.App.Id/files">See the generated files</a></p>
+	</section>
+
+	<section class="card" id="secrets">
+		<h2>Secret settings</h2>
+		<p class="small">API keys, passwords and tokens your app reads from its environment. Jfri stores them encrypted, never shows them again, and puts them on the server only in 0600 files@(plan.Runtime == RuntimeKind.Kubernetes ? " and Kubernetes Secrets" : ""). Changes apply on the next deploy.</p>
+		@if (Model.SecretNames.Count > 0)
+		{
+			<ul class="list">
+				@foreach (var name in Model.SecretNames)
+				{
+					<li class="row">
+						<code>@name</code>
+						<form method="post" asp-page-handler="RemoveSecret" class="inline">
+							<input type="hidden" name="Name" value="@name" />
+							<button type="submit" class="link danger">Remove</button>
+						</form>
+					</li>
+				}
+			</ul>
+		}
+		<form method="post" asp-page-handler="SetSecret" class="inline">
+			<label>Name <input name="Name" list="unset-settings" required pattern="[A-Z_][A-Z0-9_]*" autocomplete="off" spellcheck="false" placeholder="STRIPE_SECRET" /></label>
+			<label>Value <input name="Value" type="password" required autocomplete="new-password" /></label>
+			<button type="submit">Save secret</button>
+		</form>
+		<datalist id="unset-settings">
+			@foreach (var key in plan.UnsetEnvironment.Where(k => Planner.IsSecretSettingName(k)))
+			{
+				<option value="@key"></option>
+			}
+		</datalist>
 	</section>
 
 	<section>
@@ -198,21 +229,24 @@ else
 	{
 		<form method="post" asp-page-handler="TakeDown" class="card">
 			<h2>Take it down</h2>
-			<p class="small">Deletes @Model.App.Name from @server.Name: its containers, database and volumes. Nightly backups stay on the server in <code>/var/lib/jfri/backups/@Model.App.Name</code>, and the server keeps running.</p>
+			<p class="small">Deletes @Model.App.Name from @server.Name: its containers, database and volumes. Nightly backups stay on the server in <code>/var/lib/jfri/backups/@Model.App.Name</code>, and the server keeps running. If the server itself is gone, remove it on the <a href="/connections#servers">Connections</a> page instead.</p>
 			<div class="confirm">
-				<label>Type <code>@Model.App.Name</code> to confirm <input name="ConfirmName" autocomplete="off" required /></label>
+				<label><span>Type <code>@Model.App.Name</code> to confirm</span> <input name="ConfirmName" autocomplete="off" required /></label>
 				<button type="submit" class="danger">Take down from @server.Name</button>
 			</div>
 		</form>
 	}
-	<form method="post" asp-page-handler="Delete" class="card">
-		<h2>Remove from Jfri</h2>
-		<p class="small">@(Model.Server is null ? "Deletes the app's settings, secrets and deployment history from Jfri." : $"Jfri forgets the app and its generated secrets, but it keeps running on {Model.Server.Name}. Take it down first to stop it.")</p>
-		<div class="confirm">
-			<label>Type <code>@Model.App.Name</code> to confirm <input name="ConfirmName" autocomplete="off" required /></label>
-			<button type="submit" class="danger">Remove app from Jfri</button>
-		</div>
-	</form>
+	else
+	{
+		<form method="post" asp-page-handler="Delete" class="card">
+			<h2>Remove from Jfri</h2>
+			<p class="small">Deletes the app's settings, secrets and deployment history from Jfri.</p>
+			<div class="confirm">
+				<label><span>Type <code>@Model.App.Name</code> to confirm</span> <input name="ConfirmName" autocomplete="off" required /></label>
+				<button type="submit" class="danger">Remove app from Jfri</button>
+			</div>
+		</form>
+	}
 </section>
 
 @functions {

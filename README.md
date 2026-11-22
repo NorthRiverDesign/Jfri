@@ -16,7 +16,8 @@ production-grade answers are well established too. Jfri connects the two.
    carries its evidence and a confidence. An existing `Dockerfile` always wins over inference.
    When Jfri can't recognise an app, it says what it saw instead of guessing.
 2. **Plan** a production deployment you can review and adjust: runtime, domain, database disk,
-   backups, extra environment.
+   backups, extra environment and **secret settings** (API keys and the like; Jfri suggests the
+   ones your app reads but nobody set).
 3. **Estimate** the monthly cost on Hetzner Cloud, DigitalOcean, Vultr and Akamai (Linode).
    Vultr and Linode prices are live from their public APIs. Hetzner and DigitalOcean are live
    once you add a token, and otherwise come from a dated catalog.
@@ -28,7 +29,8 @@ production-grade answers are well established too. Jfri connects the two.
    three, and each comes back with the settings it was released with; database migrations aren't
    undone). Taking an app down deletes its containers, database and volumes from the server,
    keeps the nightly backups in `/var/lib/jfri/backups/<app>`, and asks you to type the app's
-   name first.
+   name first. A deployed app has to be taken down before Jfri will forget it, so nothing keeps
+   running on a server without Jfri knowing.
 
 ### Stacks
 
@@ -49,7 +51,8 @@ Databases: PostgreSQL, MySQL, MariaDB, MongoDB, SQL Server, SQLite. Caches: Redi
 - **Databases are private**: no public port, a generated password (kept stable across deploys),
   data on a persistent volume, nightly dumps with retention, and optional provider snapshots.
 - **Secrets** are generated with a CSPRNG and only reach the server inside 0600 files or
-  Kubernetes Secrets (k3s with secrets encryption at rest). They're scrubbed from logs. One
+  Kubernetes Secrets (k3s with secrets encryption at rest), like the secret settings you add.
+  They're scrubbed from logs. One
   exception: the cache password is passed to `valkey-server` as an argument, so root on the
   server can see it in the process list.
 - **Release step**: migrations run once per deploy before new code takes traffic.
@@ -105,8 +108,8 @@ placeholders, so you can commit or run them without Jfri.
 - A single admin account (PBKDF2 hashes via ASP.NET Core Identity's hasher), rate-limited
   sign-in, SameSite=Strict cookies, antiforgery tokens on every form, and a strict CSP with no
   inline script.
-- Provider tokens, SSH private keys, git tokens and generated app secrets are encrypted at rest
-  with ASP.NET Core Data Protection. Tokens are never rendered back.
+- Provider tokens, SSH private keys, git tokens, generated app secrets and your secret settings
+  are encrypted at rest with ASP.NET Core Data Protection. None of them are rendered back.
 - Repositories: https URLs only, with no credentials in the URL. The token travels as an
   HTTP header through git's environment config. Clones are shallow, with submodules, hooks and
   symlinks disabled and a size cap. The analyzer never follows symlinks.
@@ -139,8 +142,9 @@ Jfri is an experiment.
 - **Covered by tests:**
   - analysis on fixture repos for each stack
   - planning
-  - generated artifacts (YAML parsed, shell checked with `bash -n`, Compose checked with
-    `docker compose config`)
+  - generated artifacts (YAML parsed, shell checked with `bash -n` and against fake
+    `docker`/`k3s` commands, Compose checked with `docker compose config`, including that
+    awkward values reach the containers unchanged)
   - cost estimates
   - deployment step order against a fake server
 

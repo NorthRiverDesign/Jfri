@@ -89,6 +89,8 @@ public sealed class App
 	public required string OptionsJson { get; set; }
 	/// <summary>Generated secrets (database passwords, app keys), encrypted. Kept across deploys.</summary>
 	public string? EncryptedSecrets { get; set; }
+	/// <summary>The user's secret settings (name to value), encrypted. Names are also listed in the options.</summary>
+	public string? EncryptedUserSecrets { get; set; }
 	public required string EncryptedWebhookSecret { get; set; }
 	public int? ServerId { get; set; }
 	public string? LiveUrl { get; set; }

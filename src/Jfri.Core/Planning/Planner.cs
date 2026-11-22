@@ -102,6 +102,21 @@ public static partial class Planner
 			env.RemoveAll(e => e.Key == key);
 			env.Add(new PlannedEnv(key, value));
 		}
+		var userSecrets = options.SecretSettings.Where(IsSecretSettingName).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+		foreach (var key in userSecrets)
+		{
+			env.RemoveAll(e => e.Key == key);
+			env.Add(new PlannedEnv(key, $"{{{{secret:{key}}}}}"));
+			// A setting with the name of a generated secret (APP_KEY, say) replaces its value; the generated one stays as the fallback.
+			if (secrets.All(s => s.Name != key))
+			{
+				secrets.Add(new PlannedSecret(key, SecretKind.UserProvided, "set by you"));
+			}
+		}
+		if (userSecrets.Count > 0)
+		{
+			decisions.Add($"Your secret settings ({string.Join(", ", userSecrets)}) only reach the server in 0600 files{(options.Runtime == RuntimeKind.Kubernetes ? " and Kubernetes Secrets" : "")}.");
+		}
 		var unset = profile.Environment.Select(e => e.Key).Where(k => env.All(e => e.Key != k)).OrderBy(k => k, StringComparer.Ordinal).ToList();
 
 		// Backups
@@ -504,6 +519,17 @@ public static partial class Planner
 		slug = slug.Length > 40 ? slug[..40].TrimEnd('-') : slug;
 		return slug;
 	}
+
+	/// <summary>
+	/// Secrets the database and cache are initialized with. Replacing one would lock the app out of its
+	/// data, so they can't be overridden.
+	/// </summary>
+	public static readonly IReadOnlySet<string> ManagedSecrets = new HashSet<string>(StringComparer.Ordinal) { "DB_PASSWORD", "DB_ROOT_PASSWORD", "REDIS_PASSWORD" };
+
+	/// <summary>Names a user's secret setting can have: an environment variable name that secret tokens accept, and not a managed secret.</summary>
+	public static bool IsSecretSettingName(string name) =>
+		name.Length is > 0 and <= 100 && (char.IsAsciiLetterUpper(name[0]) || name[0] == '_')
+		&& name.All(c => char.IsAsciiLetterUpper(c) || char.IsAsciiDigit(c) || c == '_') && !ManagedSecrets.Contains(name);
 
 	public static bool IsValidSlug(string value) => ValidSlugRegex().IsMatch(value) && !IsReserved(value);
 

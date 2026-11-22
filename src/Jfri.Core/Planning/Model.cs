@@ -23,7 +23,7 @@ public enum SecretKind
 	Hex64,
 	/// <summary>50 random characters (Django SECRET_KEY).</summary>
 	Long,
-	/// <summary>Provided by the user (never generated).</summary>
+	/// <summary>Set by the user on the app's page (never generated).</summary>
 	UserProvided,
 }
 
@@ -44,6 +44,11 @@ public sealed class PlanOptions
 	public bool ProviderBackups { get; set; } = true;
 	/// <summary>Extra environment variables (non-secret) the user wants set.</summary>
 	public Dictionary<string, string> ExtraEnvironment { get; set; } = [];
+	/// <summary>
+	/// Names of secret settings the user set (API keys and the like). Only the names live here; the
+	/// values are stored encrypted and reach the server only in 0600 files and Kubernetes Secrets.
+	/// </summary>
+	public List<string> SecretSettings { get; set; } = [];
 }
 
 /// <summary>A process (container) the app runs: the web server, a queue worker, the scheduler.</summary>

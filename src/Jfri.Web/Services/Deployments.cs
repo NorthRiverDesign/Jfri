@@ -330,10 +330,10 @@ public sealed class DeploymentWorker(IServiceScopeFactory scopes, DeploymentQueu
 
 	async Task<IReadOnlyDictionary<string, string>> SecretsAsync(Run run, DeploymentPlan plan, CancellationToken ct)
 	{
-		var secrets = SecretGenerator.Fill(plan.Secrets, run.Vault.UnprotectMap(run.App.EncryptedSecrets));
-		run.App.EncryptedSecrets = run.Vault.ProtectMap(secrets);
+		var (generated, all) = SecretGenerator.ForDeploy(plan.Secrets, run.Vault.UnprotectMap(run.App.EncryptedSecrets), run.Vault.UnprotectMap(run.App.EncryptedUserSecrets));
+		run.App.EncryptedSecrets = run.Vault.ProtectMap(generated);
 		await run.Db.SaveChangesAsync(ct);
-		return secrets;
+		return all;
 	}
 
 	/// <summary>Checks the app fits on the server, then waits for SSH.</summary>
